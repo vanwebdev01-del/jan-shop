@@ -603,25 +603,64 @@ table.admin-table tbody tr:hover{background:#FFFBFC}
     <form id="productForm">
       <div class="modal-body">
         <div class="form-grid">
-          <div class="field full"><label for="pName">Product name</label><div class="input-wrap"><input type="text" id="pName" required></div></div>
-          <div class="field"><label for="pCategory">Category</label><div class="input-wrap">
-            <select id="pCategory">
-              <option value="skincare">Skincare</option><option value="makeup">Makeup</option>
-              <option value="fragrance">Fragrance</option><option value="body">Body</option>
-              <option value="accessories">Accessories</option>
-            </select></div></div>
-          <div class="field"><label for="pPrice">Price (PHP)</label><div class="input-wrap"><input type="number" id="pPrice" min="0" step="0.01" required></div></div>
-          <div class="field"><label for="pTag">Tag</label><div class="input-wrap">
-            <select id="pTag"><option value="">None</option><option value="Bestseller">Bestseller</option><option value="New">New</option></select>
-          </div></div>
-          <div class="field"><label for="pIcon">Icon</label><div class="input-wrap">
-            <select id="pIcon">
-              <option value="serum">Serum</option><option value="lipstick">Lipstick</option>
-              <option value="cream">Cream</option><option value="perfume">Perfume</option>
-              <option value="candle">Candle</option><option value="brush">Brush</option>
-            </select></div></div>
-          <div class="field"><label for="pRating">Rating (0–5)</label><div class="input-wrap"><input type="number" id="pRating" min="0" max="5" step="0.1" value="4.8"></div></div>
-          <div class="field"><label for="pReviews">Reviews</label><div class="input-wrap"><input type="number" id="pReviews" min="0" value="0"></div></div>
+          <div class="field full">
+            <label for="pName">Product name</label>
+            <div class="input-wrap"><input type="text" id="pName" required></div>
+          </div>
+          
+          <div class="field">
+            <label for="pCategory">Category</label>
+            <div class="input-wrap">
+              <select id="pCategory">
+                <option value="skincare">Skincare</option><option value="makeup">Makeup</option>
+                <option value="fragrance">Fragrance</option><option value="body">Body</option>
+                <option value="accessories">Accessories</option>
+              </select>
+            </div>
+          </div>
+          
+          <div class="field">
+            <label for="pPrice">Price (PHP)</label>
+            <div class="input-wrap"><input type="number" id="pPrice" min="0" step="0.01" required></div>
+          </div>
+          
+          <div class="field">
+            <label for="pTag">Tag</label>
+            <div class="input-wrap">
+              <select id="pTag"><option value="">None</option><option value="Bestseller">Bestseller</option><option value="New">New</option></select>
+            </div>
+          </div>
+          
+          <div class="field">
+            <label for="pIcon">Icon (Kung walang image)</label>
+            <div class="input-wrap">
+              <select id="pIcon">
+                <option value="serum">Serum</option><option value="lipstick">Lipstick</option>
+                <option value="cream">Cream</option><option value="perfume">Perfume</option>
+                <option value="candle">Candle</option><option value="brush">Brush</option>
+              </select>
+            </div>
+          </div>
+          
+          <div class="field">
+            <label for="pRating">Rating (0–5)</label>
+            <div class="input-wrap"><input type="number" id="pRating" min="0" max="5" step="0.1" value="4.8"></div>
+          </div>
+          
+          <div class="field">
+            <label for="pReviews">Reviews</label>
+            <div class="input-wrap"><input type="number" id="pReviews" min="0" value="0"></div>
+          </div>
+
+          <!-- BAGONG DAGDAG PARA SA IMAGE UPLOAD -->
+          <div class="field full">
+            <label for="pImageFile">Product Image (Upload File)</label>
+            <div class="input-wrap" style="padding: 10px; border: 1px dashed var(--line); border-radius: 12px; background: #fff;">
+              <input type="file" id="pImageFile" accept="image/*" style="border:none; padding:0;">
+              <p style="font-size: 11px; color: var(--muted); margin-top: 5px;">Pumili ng image (max 5MB). Kung wala, mag-fallback tayo sa Icon sa taas.</p>
+            </div>
+          </div>
+
         </div>
       </div>
       <div class="modal-foot">
@@ -1170,39 +1209,70 @@ async function saveProduct(e){
   const iconName = $('#pIcon').value;
   const rating = parseFloat($('#pRating').value) || 4.8;
   const reviews = parseInt($('#pReviews').value) || 0;
+  const fileInput = $('#pImageFile');
 
   if (!name || isNaN(price) || price < 0){ toast('Fill name and valid price'); return; }
 
   const btn = $('#saveProductBtn');
-  btn.disabled = true; btn.textContent = 'Saving…';
+  btn.disabled = true; btn.textContent = 'Uploading & Saving...';
 
   try {
+    let imageUrl = null;
+
+    // 1. KUNG MAY NAG-UPLOAD NA FILE, I-UPLOAD SA SUPABASE STORAGE
+    if (fileInput.files.length > 0) {
+      const file = fileInput.files[0];
+      if (file.size > 5 * 1024 * 1024) throw new Error("Image must be less than 5MB");
+      
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+      
+      const { error: uploadError } = await sb.storage
+        .from('product-images')
+        .upload(fileName, file);
+        
+      if (uploadError) throw uploadError;
+      
+      const { data: urlData } = sb.storage
+        .from('product-images')
+        .getPublicUrl(fileName);
+        
+      imageUrl = urlData.publicUrl;
+    }
+
+    // 2. I-SAVE ANG PRODUCT SA DATABASE
     if (state.editingId){
-      const { error } = await sb.from('products').update({
-        name, category, price, tag, icon: iconName, rating, reviews
-      }).eq('id', state.editingId);
+      const payload = { name, category, price, tag, icon: iconName, rating, reviews };
+      if (imageUrl) payload.image_url = imageUrl; // Idagdag lang kung may bago
+
+      const { error } = await sb.from('products').update(payload).eq('id', state.editingId);
       if (error) throw error;
       toast('Product updated');
     } else {
       const newId = Math.max(0, ...state.products.map(p=>p.id)) + 1;
       const g = GRADS[newId % GRADS.length];
+      
       const { error } = await sb.from('products').insert({
         name, category, price, tag, icon: iconName, rating, reviews,
-        grad_from: g[0], grad_to: g[1]
+        grad_from: g[0], grad_to: g[1],
+        image_url: imageUrl // Isasama ang image URL (null kung walang inupload)
       });
       if (error) throw error;
       toast('Product added');
     }
+
     closeModal();
     await refreshAdmin();
   } catch(err){
     toast('Save failed: ' + err.message);
+    console.error(err);
   } finally {
     btn.disabled = false;
     btn.textContent = state.editingId ? 'Update Product' : 'Save Product';
+    fileInput.value = ''; // Clear input
   }
 }
-
+  
 async function deleteProduct(id){
   const p = state.products.find(x=>x.id===id);
   if (!p) return;
